@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DI vs SIADH — Space Invaders Learning Game</title>
+<style>
+  body { background:#000; margin:0; overflow:hidden; color:#9fe; font-family:monospace; }
+  canvas { display:block; margin:auto; background:#001; border:3px solid #0ff; image-rendering:pixelated; }
+  #hud { width:800px; margin:10px auto; display:flex; justify-content:space-between; align-items:center; }
+  #healthIcons img { width:32px; height:32px; margin-right:4px; }
+  #endMessage { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:40px; color:#9fe; display:none; text-align:center; }
+  #instructions { width:800px; margin:10px auto; font-size:14px; color:#bcd; }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div id="scoreBox">Score: <span id="score">0</span> | High: <span id="high">0</span></div>
+  <div id="healthIcons"></div>
+</div>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<div id="endMessage"></div>
+
+<div id="instructions">
+  Controls: ← → or A D to move. Space to fire.<br>
+  Destroy only the <strong>Diabetes Insipidus (DI)</strong> aliens.<br>
+  Avoid destroying <strong>SIADH</strong> (friendly) aliens.
+</div>
+
+<audio id="blasterSound" src="blaster.mp3" preload="auto"></audio>
+<audio id="destructionSound" src="destruction.mp3" preload="auto"></audio>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const CANVAS_W = canvas.width, CANVAS_H = canvas.height;
+
+let ship = { x: CANVAS_W/2 - 20, y: CANVAS_H - 60, w: 40, h: 40 };
+let shots = [], aliens = [], pointAnimations = [];
+let keys = {};
+let score = 0, health = 3, gameEnded = false;
+
+let DI_STATEMENTS = [
+  '↑ urine output','Lack ADH','↓ urine osmolality','↓ urine SG','↑ serum Na',
+  '↑ serum osmolality','Treat with DDAVP','Treat with Vasopressin'
+];
+let SIADH_STATEMENTS = [
+  '↓ serum Na','↓ serum osmolality','↓ urine output','↑ urine Na','Excess ADH',
+  'Restrict fluids','Treat with Vaptans','3% hypertonic saline'
+];
+
+let ALIEN_DECK = [];
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ let j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+DI_STATEMENTS.forEach(s=>ALIEN_DECK.push({label:s,type:'DI'}));
+SIADH_STATEMENTS.forEach(s=>ALIEN_DECK.push({label:s,type:'SIADH'}));
+shuffle(ALIEN_DECK);
+
+let alienShipImg = new Image(); alienShipImg.src = 'alien_ship.png';
+let playerShipImg = new Image(); playerShipImg.src = 'spaceship.png';
+let blasterSound = document.getElementById('blasterSound');
+let destructionSound = document.getElementById('destructionSound');
+
+document.addEventListener('keydown', e => { 
+  keys[e.key] = true; 
+  if(e.key === ' ') shoot();
+});
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+function shoot(){
+  if(gameEnded) return;
+  shots.push({ x: ship.x + ship.w/2 - 2, y: ship.y, w: 4, h: 10 });
+  if(blasterSound && blasterSound.play){ try{ blasterSound.currentTime = 0; blasterSound.play(); } catch(e){} }
+}
+
+function spawnAlien(){
+  if(ALIEN_DECK.length === 0) return;
+  let item = ALIEN_DECK.shift();
+  ctx.font = '14px monospace';
+  let w = Math.max(100, ctx.measureText(item.label).width + 40);
+  let h = 60;
+  let x = Math.random() * (CANVAS_W - w - 20) + 10;
+  let y = -h;
+  let zigzag = Math.random() < 0.25;
+  let zigzagRange = 100 + Math.random() * 120;
+  aliens.push({
+    x, y, w, h, label:item.label, type:item.type, passed:false,
+    baseSpeed: 0.3 + Math.random()*0.015,
+    zigzag, zigzagRange, dir:(Math.random()<0.5?-1:1),
+    zigzagProgress:0, zigzagTurns:0
+  });
+}
+
+function draw(){
+  ctx.clearRect(0,0,CANVAS_W,CANVAS_H);
+  if(playerShipImg.complete && playerShipImg.naturalWidth>0){
+    ctx.drawImage(playerShipImg, ship.x, ship.y, ship.w, ship.h);
+  } else {
+    ctx.fillStyle='#0ff'; ctx.fillRect(ship.x, ship.y, ship.w, ship.h);
+  }
+
+  ctx.fillStyle='#9fe';
+  shots.forEach(s => ctx.fillRect(Math.round(s.x), Math.round(s.y), s.w, s.h));
+
+  for(let a of aliens){
+    if(alienShipImg.complete && alienShipImg.naturalWidth>0){
+      ctx.drawImage(alienShipImg, a.x, a.y, a.w, a.h);
+    } else {
+      ctx.fillStyle=(a.type==='DI')?'#c86':'#6ac';
+      ctx.fillRect(Math.round(a.x),Math.round(a.y),a.w,a.h);
+    }
+
+    let fontSize = 18;
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    for(fontSize=18;fontSize>=8;fontSize--){
+      ctx.font=fontSize+'px monospace';
+      if(ctx.measureText(a.label).width <= a.w - 10) break;
+    }
+    ctx.fillStyle='#fff';
+    ctx.fillText(a.label, a.x + a.w/2, a.y + a.h/2);
+  }
+
+  pointAnimations.forEach(pa=>{
+    ctx.fillStyle=pa.color;
+    ctx.font='16px monospace';
+    ctx.textAlign='center';
+    ctx.fillText(pa.text, pa.x, pa.y);
+    pa.y -= 1; pa.timer--;
+  });
+  pointAnimations = pointAnimations.filter(pa => pa.timer > 0);
+}
+
+function update(){
+  if(gameEnded) return;
+
+  if(keys['ArrowLeft'] && ship.x > 0) ship.x -= 5;
+  if(keys['ArrowRight'] && ship.x + ship.w < CANVAS_W) ship.x += 5;
+
+  shots.forEach(s => s.y -= 6);
+  shots = shots.filter(s => s.y > -s.h);
+
+  for(let ai=aliens.length-1; ai>=0; ai--){
+    let a = aliens[ai];
+    a.y += a.baseSpeed;
+
+    if(a.zigzag){
+      a.x += a.dir * 0.5;
+      a.zigzagProgress += Math.abs(a.dir * 0.5);
+      if(a.zigzagProgress > a.zigzagRange || a.x <= 0 || a.x + a.w >= CANVAS_W){
+        a.dir *= -1; a.zigzagProgress = 0; a.zigzagTurns++;
+        if(a.zigzagTurns > 2) a.zigzag = false;
+      }
+      if(a.x < 0) a.x = 0;
+      if(a.x + a.w > CANVAS_W) a.x = CANVAS_W - a.w;
+    }
+
+    if(a.y > CANVAS_H && !a.passed){
+      a.passed = true;
+      if(a.type==='DI'){
+        health--;
+        if(destructionSound && destructionSound.play){ try{ destructionSound.currentTime = 0; destructionSound.play(); } catch(e){} }
+        updateHUD();
+        if(health <= 0){ showEndMessage("GAME OVER"); return; }
+      }
+    }
+  }
+
+  for(let si=shots.length-1; si>=0; si--){
+    let s = shots[si];
+    for(let ai=aliens.length-1; ai>=0; ai--){
+      let a = aliens[ai];
+      if(s.x < a.x + a.w && s.x + s.w > a.x && s.y < a.y + a.h && s.y + s.h > a.y){
+        shots.splice(si,1);
+        aliens.splice(ai,1);
+        if(destructionSound && destructionSound.play){ try{ destructionSound.currentTime = 0; destructionSound.play(); } catch(e){} }
+        score += (a.type === 'DI' ? 75 : -100);
+        pointAnimations.push({x:a.x+a.w/2, y:a.y, text:(a.type==='DI'?'+75':'-100'), color:(a.type==='DI'?'#0f0':'#f33'), timer:30});
+        updateHUD();
+        if(score > (localStorage.getItem('di_highscore')||0)){
+          localStorage.setItem('di_highscore', score);
+        }
+        break;
+      }
+    }
+  }
+
+  // ✅ Check for Mission Complete when all aliens are gone or have passed
+  const allAliensProcessed = ALIEN_DECK.length === 0 && aliens.every(a => a.passed);
+  if(allAliensProcessed && health > 0){
+    showEndMessage("MISSION COMPLETE");
+  }
+}
+
+function updateHUD(){
+  document.getElementById('score').textContent = score;
+  let high = parseInt(localStorage.getItem('di_highscore')||0,10);
+  document.getElementById('high').textContent = high;
+  let healthIcons = document.getElementById('healthIcons');
+  healthIcons.innerHTML = '';
+  for(let i=0;i<health;i++){
+    let img = document.createElement('img');
+    img.src = 'spaceship.png';
+    healthIcons.appendChild(img);
+  }
+}
+
+function showEndMessage(msg){
+  gameEnded = true;
+  const endMsg = document.getElementById('endMessage');
+  endMsg.textContent = msg;
+  endMsg.style.display = 'block';
+}
+
+function gameLoop(){
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+updateHUD();
+setInterval(spawnAlien, 2000);
+gameLoop();
+</script>
+
+</body>
+</html>
